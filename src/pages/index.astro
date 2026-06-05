@@ -1,0 +1,1041 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Te Quiero Mucho">
+    <main>
+        <canvas id="flower-canvas"></canvas>
+
+        <div class="atmos-glow"></div>
+
+        <svg
+            class="grain"
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            <filter id="noise">
+                <feTurbulence
+                    type="fractalNoise"
+                    baseFrequency="0.68"
+                    numOctaves="3"
+                    stitchTiles="stitch"></feTurbulence>
+                <feColorMatrix type="saturate" values="0"></feColorMatrix>
+            </filter>
+            <rect width="100%" height="100%" filter="url(#noise)"></rect>
+        </svg>
+
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+
+        <div id="poem">
+            <p>¿Qué es amor? Es un perfume</p>
+            <p>que las flores al morir</p>
+            <p>dejan en el aire... así</p>
+            <p>queda tu recuerdo en mí.</p>
+            <span class="author">— Gustavo Adolfo Bécquer</span>
+        </div>
+        <audio id="bg-audio" src="/sound.mp3" loop></audio>
+
+        <div id="audio-controls">
+            <button id="play-btn" aria-label="Play/Pause">
+                <svg id="icon-pause" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18"/><rect x="15" y="3" width="4" height="18"/></svg>
+                <svg id="icon-play"  width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
+            <button id="mute-btn" aria-label="Mute/Unmute">
+                <svg id="icon-vol"  width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                <svg id="icon-mute" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06A8.99 8.99 0 0 0 17.73 18.73L19.73 21 21 19.73l-18-18zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+            </button>
+            <input id="volume-slider" type="range" min="0" max="1" step="0.02" value="0.7" />
+        </div>
+
+        <div id="fade-overlay"></div>
+        <button id="picame-btn">picame</button>
+    </main>
+</Layout>
+
+<script>
+    import * as THREE from "three";
+
+    const canvas = document.getElementById(
+        "flower-canvas",
+    ) as HTMLCanvasElement;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+        52,
+        innerWidth / innerHeight,
+        0.1,
+        100,
+    );
+    const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: true,
+    });
+
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.6;
+
+    camera.position.set(0, 0.8, 5.5);
+    camera.lookAt(0, 0.0, 0);
+
+    // ── Parametric lotus, direct port of the p5.js lotus() function ──
+    // p5 uses angleMode(DEGREES), so all trig args are in degrees there.
+    // We convert: sin(deg) → Math.sin(deg*D), asin(val) → Math.asin(val)/D
+    const D = Math.PI / 190;
+    const S = 1.6 / 300; // map p5's 300-unit scale to ~2.6 Three.js units
+
+    // Build as a proper indexed mesh — same parametric math, solid surface
+    function buildLotus() {
+        const R_STEPS = 51; // r: 0 → 1, step 0.02
+        const T_STEPS = 961; // theta: 0 → 1440, step 1.5
+
+        const positions = new Float32Array(R_STEPS * T_STEPS * 3);
+        const colors = new Float32Array(R_STEPS * T_STEPS * 3);
+        const indices: number[] = [];
+
+        for (let ri = 0; ri < R_STEPS; ri++) {
+            const r = ri * 0.02;
+            const hue = (20 + r * 8) / 360; // 20°–28°: solidly orange
+            const lit = 0.08 + r * 0.62;
+            const c = new THREE.Color().setHSL(hue, 1.0, lit);
+
+            for (let ti = 0; ti < T_STEPS; ti++) {
+                const theta = ti * 1.5;
+                const phi = (180 / 2.5) * Math.exp(-theta / (6.5 * 180));
+                const phiR = phi * D;
+                const thetaR = theta * D;
+
+                const s2 = Math.sin(2.25 * theta * D);
+                const a2 = Math.asin(s2) / D;
+                const petalCut = 0.5 + Math.abs(a2 + 120 * s2) / 360;
+
+                const hangDown =
+                    2.3 * r * r * Math.pow(0.8 * r - 1, 2) * Math.sin(phiR);
+                const base = r * Math.sin(phiR) + hangDown * Math.cos(phiR);
+                const sc = S * 300 * (1 - theta / 10000) * petalCut;
+
+                const vi = (ri * T_STEPS + ti) * 3;
+                positions[vi] = sc * base * Math.sin(thetaR);
+                positions[vi + 1] =
+                    -sc * (r * Math.cos(phiR) - hangDown * Math.sin(phiR));
+                positions[vi + 2] = sc * base * Math.cos(thetaR);
+                colors[vi] = c.r;
+                colors[vi + 1] = c.g;
+                colors[vi + 2] = c.b;
+            }
+        }
+
+        // Connect adjacent grid vertices into triangles
+        for (let ri = 0; ri < R_STEPS - 1; ri++) {
+            for (let ti = 0; ti < T_STEPS - 1; ti++) {
+                const a = ri * T_STEPS + ti,
+                    b = ri * T_STEPS + ti + 1;
+                const c = (ri + 1) * T_STEPS + ti,
+                    d = (ri + 1) * T_STEPS + ti + 1;
+                indices.push(a, b, d, a, d, c);
+            }
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo;
+    }
+
+    const flower = new THREE.Group();
+
+    const lotusMesh = new THREE.Mesh(
+        buildLotus(),
+        new THREE.MeshPhysicalMaterial({
+            vertexColors: true,
+            roughness: 0.75,
+            metalness: 0.0,
+            side: THREE.DoubleSide,
+            sheen: 1.0,
+            sheenColor: new THREE.Color(0xff7a00),
+            sheenRoughness: 0.4,
+        }),
+    );
+    lotusMesh.rotation.x = 190 * D;
+    lotusMesh.position.y = -0.5;
+    flower.add(lotusMesh);
+
+    // Stem
+    const stemMat = new THREE.MeshPhysicalMaterial({
+        color: 0x1e5c14,
+        roughness: 0.8,
+    });
+    const stem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.08, 3.2, 12),
+        stemMat,
+    );
+    stem.position.y = -1.4;
+    flower.add(stem);
+
+    scene.add(flower);
+
+    // ── Outdoor scene (hidden by default) ──────────
+    const outdoor = new THREE.Group();
+    outdoor.visible = false;
+    scene.add(outdoor);
+
+    // ── Ground: high-res plane with vertex displacement + colour ──
+    const groundGeo = new THREE.PlaneGeometry(60, 60, 80, 80);
+    const gPos = groundGeo.attributes.position as THREE.BufferAttribute;
+    const gCols = new Float32Array(gPos.count * 3);
+    for (let i = 0; i < gPos.count; i++) {
+        const x = gPos.getX(i),
+            z = gPos.getZ(i);
+        const h =
+            0.09 * Math.sin(x * 0.85 + 1.1) * Math.cos(z * 0.7) +
+            0.05 * Math.sin(x * 2.4 - 0.4) * Math.sin(z * 1.9 + 1.3) +
+            0.02 * Math.sin(x * 5.2 + z * 4.4);
+        gPos.setY(i, h);
+        const t = (Math.sin(x * 1.4 + z * 2.1) + 1) * 0.5;
+        const s = (Math.cos(x * 2.7 - z * 1.8) + 1) * 0.5;
+        gCols[i * 3] = 0.25 + t * 0.15;
+        gCols[i * 3 + 1] = 0.6 + t * 0.2 + s * 0.07;
+        gCols[i * 3 + 2] = 0.1 + t * 0.08;
+    }
+    groundGeo.setAttribute("color", new THREE.BufferAttribute(gCols, 3));
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(
+        groundGeo,
+        new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            roughness: 0.95,
+            metalness: 0.0,
+        }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -2.6;
+    outdoor.add(ground);
+
+    // Solid soil/earth block beneath the grass so it has visible depth
+    const soil = new THREE.Mesh(
+        new THREE.BoxGeometry(62, 1.5, 62),
+        new THREE.MeshStandardMaterial({
+            color: 0x57a832,
+            roughness: 0.98,
+            metalness: 0,
+        }),
+    );
+    soil.position.y = -3.45;
+    outdoor.add(soil);
+
+    // ── Grass blades: tapered, leaning, per-instance colour ──
+    const bladeGeo = new THREE.PlaneGeometry(0.05, 0.28, 1, 5);
+    const bAttr = bladeGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < bAttr.count; i++) {
+        const y0 = bAttr.getY(i) + 0.14; // shift base to y=0
+        const tv = Math.max(0, y0 / 0.28);
+        bAttr.setX(i, bAttr.getX(i) * (1 - tv * 0.55)); // taper
+        bAttr.setZ(i, tv * tv * 0.09); // forward lean
+        bAttr.setY(i, y0);
+    }
+    bladeGeo.computeVertexNormals();
+
+    const BLADES = 60000;
+    const blades = new THREE.InstancedMesh(
+        bladeGeo,
+        new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide,
+        }),
+        BLADES,
+    );
+    const dummy = new THREE.Object3D();
+    const bColor = new THREE.Color();
+    // Store per-blade base data for wind animation: [x, z, rotY, sx, sy]
+    const bladeBase = new Float32Array(BLADES * 5);
+
+    for (let i = 0; i < BLADES; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 31;
+        const bx = Math.cos(ang) * dist;
+        const bz = Math.sin(ang) * dist;
+        const rY = Math.random() * Math.PI * 2;
+        const sx = 0.7 + Math.random() * 0.8;
+        const sy = 0.5 + Math.random() * 3;
+
+        bladeBase[i * 5] = bx;
+        bladeBase[i * 5 + 1] = bz;
+        bladeBase[i * 5 + 2] = rY;
+        bladeBase[i * 5 + 3] = sx;
+        bladeBase[i * 5 + 4] = sy;
+
+        dummy.position.set(bx, -2.6, bz);
+        dummy.rotation.set(0, rY, 0);
+        dummy.scale.set(sx, sy, 1);
+        dummy.updateMatrix();
+        blades.setMatrixAt(i, dummy.matrix);
+        bColor.set(0x81c784);
+        blades.setColorAt(i, bColor);
+    }
+    blades.instanceMatrix.needsUpdate = true;
+    if (blades.instanceColor) blades.instanceColor.needsUpdate = true;
+    outdoor.add(blades);
+
+    // ── Small daisy flowers scattered in the grass ──
+    function buildDaisyGeo(n = 8, pLen = 0.11, pWid = 0.05) {
+        const verts: number[] = [];
+        const idx: number[] = [];
+        let vi = 0;
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * Math.PI * 2;
+            const c = Math.cos(a),
+                s = Math.sin(a);
+            const tx = Math.cos(a + Math.PI / 2),
+                tz = Math.sin(a + Math.PI / 2);
+            // 4 verts per petal in XZ plane (y = 0 → naturally faces up)
+            verts.push(
+                c * 0.025 - tx * pWid * 0.45,
+                0,
+                s * 0.025 - tz * pWid * 0.45,
+                c * 0.025 + tx * pWid * 0.45,
+                0,
+                s * 0.025 + tz * pWid * 0.45,
+                c * pLen + tx * pWid * 0.12,
+                0,
+                s * pLen + tz * pWid * 0.12,
+                c * pLen - tx * pWid * 0.12,
+                0,
+                s * pLen - tz * pWid * 0.12,
+            );
+            idx.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+            vi += 4;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute(
+            "position",
+            new THREE.BufferAttribute(new Float32Array(verts), 3),
+        );
+        geo.setIndex(idx);
+        geo.computeVertexNormals();
+        return geo;
+    }
+
+    const FLOWERS = 2000;
+    const BEND = 0.18; // horizontal offset at stem top
+    const fDummy = new THREE.Object3D();
+
+    // Curved stem geometry — bends toward local +X; Y-rotation per instance randomises direction
+    const stemCurveGeo = (() => {
+        const curve = new THREE.CatmullRomCurve3([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(BEND * 0.2, 0.33, 0),
+            new THREE.Vector3(BEND * 0.6, 0.67, 0),
+            new THREE.Vector3(BEND, 1.0, 0),
+        ]);
+        return new THREE.TubeGeometry(curve, 8, 0.007, 5, false);
+    })();
+
+    const petalsMesh = new THREE.InstancedMesh(
+        buildDaisyGeo(),
+        new THREE.MeshPhysicalMaterial({
+            color: 0xeef6ff,
+            roughness: 0.5,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.92,
+        }),
+        FLOWERS,
+    );
+    const centersMesh = new THREE.InstancedMesh(
+        (() => {
+            const g = new THREE.CircleGeometry(0.032, 12);
+            g.rotateX(-Math.PI / 2);
+            return g;
+        })(),
+        new THREE.MeshPhysicalMaterial({
+            color: 0xff9010,
+            roughness: 0.4,
+            emissive: new THREE.Color(0x7a3000),
+            emissiveIntensity: 0.3,
+        }),
+        FLOWERS,
+    );
+    const fStemMesh = new THREE.InstancedMesh(
+        stemCurveGeo,
+        new THREE.MeshPhysicalMaterial({ color: 0x3a8a20, roughness: 0.7 }),
+        FLOWERS,
+    );
+
+    // [fx, fz, rotY, sc, stemH]
+    const flowerBase = new Float32Array(FLOWERS * 5);
+
+    for (let i = 0; i < FLOWERS; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = Math.random() * 22;
+        const fx = Math.cos(ang) * dist;
+        const fz = Math.sin(ang) * dist;
+        const stemH = 0.85 + Math.random() * 0.35; // taller: 0.55–0.90
+        const rotY = Math.random() * Math.PI * 2; // random bend direction
+        const sc = 0.6 + Math.random() * 0.5;
+
+        flowerBase[i * 5] = fx;
+        flowerBase[i * 5 + 1] = fz;
+        flowerBase[i * 5 + 2] = rotY;
+        flowerBase[i * 5 + 3] = sc;
+        flowerBase[i * 5 + 4] = stemH;
+
+        // Top of curved stem in world space (no wind yet)
+        const headX = fx + BEND * stemH * Math.cos(rotY);
+        const headY = -2.6 + stemH;
+        const headZ = fz - BEND * stemH * Math.sin(rotY);
+
+        // Stem: base at ground, scaled to stemH, rotY sets bend direction
+        fDummy.position.set(fx, -2.6, fz);
+        fDummy.rotation.set(0, rotY, 0);
+        fDummy.scale.setScalar(stemH);
+        fDummy.updateMatrix();
+        fStemMesh.setMatrixAt(i, fDummy.matrix);
+
+        // Petals at stem top
+        fDummy.position.set(headX, headY, headZ);
+        fDummy.rotation.set(
+            (Math.random() - 0.5) * 0.2,
+            rotY,
+            (Math.random() - 0.5) * 0.2,
+        );
+        fDummy.scale.setScalar(sc);
+        fDummy.updateMatrix();
+        petalsMesh.setMatrixAt(i, fDummy.matrix);
+
+        // Center flush with petals
+        fDummy.position.set(headX, headY, headZ);
+        fDummy.rotation.set(0, rotY, 0);
+        fDummy.scale.setScalar(sc);
+        fDummy.updateMatrix();
+        centersMesh.setMatrixAt(i, fDummy.matrix);
+    }
+    petalsMesh.instanceMatrix.needsUpdate = true;
+    centersMesh.instanceMatrix.needsUpdate = true;
+    fStemMesh.instanceMatrix.needsUpdate = true;
+    outdoor.add(fStemMesh);
+    outdoor.add(petalsMesh);
+    outdoor.add(centersMesh);
+
+    // ── Outdoor lighting ──
+    // Key: warm sun from upper-right
+    const sunLight = new THREE.DirectionalLight(0xfff4d6, 3.5);
+    sunLight.position.set(8, 12, -6);
+    outdoor.add(sunLight);
+
+    // Fill: soft sky light from above-left (blue-tinted bounce from sky)
+    const skyFill = new THREE.DirectionalLight(0xc8e8ff, 1.2);
+    skyFill.position.set(-6, 8, 4);
+    outdoor.add(skyFill);
+
+    // Ground bounce: warm green reflected light from grass below
+    const groundBounce = new THREE.DirectionalLight(0xa8d878, 0.6);
+    groundBounce.position.set(0, -4, 2);
+    outdoor.add(groundBounce);
+
+    // Rim: subtle back-light for depth
+    const rimLight = new THREE.DirectionalLight(0xd0eeff, 0.5);
+    rimLight.position.set(-3, 4, -12);
+    outdoor.add(rimLight);
+
+    // ── Skybox sphere ──
+    // ── Skybox from /skybox.jpg ──
+    const skyTexture = new THREE.TextureLoader().load("/skybox.jpg");
+    outdoor.add(
+        new THREE.Mesh(
+            new THREE.SphereGeometry(80, 32, 16),
+            new THREE.MeshBasicMaterial({
+                map: skyTexture,
+                side: THREE.BackSide,
+            }),
+        ),
+    );
+
+    // Sky transition state
+    let isOutdoor = false;
+    let skyProgress = 0; // 0 = dark, 1 = outdoor
+    const skyDark = new THREE.Color(0x09090f);
+    const skyBlue = new THREE.Color(0x87ceeb);
+
+    // Glow light inside the flower
+    const centerLight = new THREE.PointLight(0xff8020, 2.0, 5.0);
+    centerLight.position.set(0, 0.8, 0);
+    flower.add(centerLight);
+
+    // Ambient particles
+    const partPos = new Float32Array(300 * 3);
+    for (let i = 0; i < partPos.length; i++)
+        partPos[i] = (Math.random() - 0.5) * 22;
+    const partGeo = new THREE.BufferGeometry();
+    partGeo.setAttribute("position", new THREE.BufferAttribute(partPos, 3));
+    const particles = new THREE.Points(
+        partGeo,
+        new THREE.PointsMaterial({
+            size: 0.032,
+            color: 0xffaa40,
+            transparent: true,
+            opacity: 0.32,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        }),
+    );
+    scene.add(particles);
+
+    // ── Outdoor particles: pollen/dust drifting in the air ──
+    function makeOutdoorParticles(
+        count: number,
+        spread: number,
+        yMin: number,
+        yMax: number,
+        color: number,
+        size: number,
+        opacity: number,
+    ) {
+        const pos = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const dist = Math.random() * spread;
+            pos[i * 3] = Math.cos(ang) * dist;
+            pos[i * 3 + 1] = yMin + Math.random() * (yMax - yMin);
+            pos[i * 3 + 2] = Math.sin(ang) * dist;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        return new THREE.Points(
+            geo,
+            new THREE.PointsMaterial({
+                size,
+                color,
+                transparent: true,
+                opacity,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            }),
+        );
+    }
+
+    // Large slow-drifting pollen
+    const pollenA = makeOutdoorParticles(
+        600,
+        18,
+        -2.0,
+        4.0,
+        0xff6a00,
+        0.055,
+        0.6,
+    );
+    const pollenB = makeOutdoorParticles(
+        400,
+        14,
+        -1.5,
+        3.0,
+        0xff9a30,
+        0.03,
+        0.45,
+    );
+    const pollenC = makeOutdoorParticles(
+        500,
+        20,
+        -2.5,
+        0.5,
+        0xffb860,
+        0.04,
+        0.35,
+    );
+    outdoor.add(pollenA);
+    outdoor.add(pollenB);
+    outdoor.add(pollenC);
+
+    // Lights (for stem)
+    scene.add(new THREE.AmbientLight(0xfff8f0, 0.75));
+    const keyLight = new THREE.DirectionalLight(0xfff0e0, 2.5);
+    keyLight.position.set(4, 6, 4);
+    scene.add(keyLight);
+    const orbitLight = new THREE.PointLight(0xff6010, 1.4, 10);
+    scene.add(orbitLight);
+
+    let tx = 0,
+        ty = 0;
+    document.addEventListener("mousemove", (e) => {
+        tx = (e.clientX / innerWidth - 0.5) * 2;
+        ty = (e.clientY / innerHeight - 0.5) * 2;
+    });
+
+    const audio   = document.getElementById("bg-audio") as HTMLAudioElement;
+    const playBtn = document.getElementById("play-btn")!;
+    const muteBtn = document.getElementById("mute-btn")!;
+    const volSlider = document.getElementById("volume-slider") as HTMLInputElement;
+    audio.volume = 0.7;
+
+    function setPlayIcon(playing: boolean) {
+        (document.getElementById("icon-pause") as HTMLElement).style.display = playing ? "" : "none";
+        (document.getElementById("icon-play")  as HTMLElement).style.display = playing ? "none" : "";
+    }
+    function setMuteIcon(muted: boolean) {
+        (document.getElementById("icon-vol")  as HTMLElement).style.display = muted ? "none" : "";
+        (document.getElementById("icon-mute") as HTMLElement).style.display = muted ? "" : "none";
+    }
+
+    playBtn.addEventListener("click", () => {
+        if (audio.paused) { audio.play(); } else { audio.pause(); }
+        setPlayIcon(!audio.paused);
+    });
+    muteBtn.addEventListener("click", () => {
+        audio.muted = !audio.muted;
+        setMuteIcon(audio.muted);
+    });
+    volSlider.addEventListener("input", () => {
+        audio.volume = parseFloat(volSlider.value);
+        if (audio.muted && audio.volume > 0) { audio.muted = false; setMuteIcon(false); }
+    });
+
+    document.getElementById("picame-btn")!.addEventListener("click", () => {
+        const overlay = document.getElementById("fade-overlay")!;
+        const btn = document.getElementById("picame-btn")!;
+        overlay.classList.add("visible");
+        setTimeout(() => {
+            isOutdoor = !isOutdoor;
+            btn.classList.toggle("outdoor", isOutdoor);
+            btn.classList.toggle("hidden", isOutdoor);
+            document.getElementById("poem")!.classList.toggle("visible", isOutdoor);
+            document.getElementById("audio-controls")!.classList.toggle("visible", isOutdoor);
+            if (isOutdoor) { audio.play(); setPlayIcon(true); }
+            else           { audio.pause(); setPlayIcon(false); }
+            overlay.classList.remove("visible");
+        }, 500);
+    });
+
+    let t = 0;
+    (function animate() {
+        requestAnimationFrame(animate);
+        t += 0.007;
+
+        if (skyProgress < 0.05) {
+            flower.rotation.y += 0.002;
+            flower.position.y = Math.sin(t * 1.1) * 0.08;
+        } else {
+            // Wind sway — only the petals, stem stays still
+            const windSway =
+                0.06 * Math.sin(t * 0.2) +
+                0.03 * Math.sin(t * 0.35 + 0.8) +
+                0.02;
+            lotusMesh.rotation.x = Math.PI + windSway;
+            lotusMesh.rotation.z = windSway * 0.4;
+        }
+        centerLight.intensity = 1.8 + Math.sin(t * 2.2) * 0.5;
+
+        orbitLight.position.set(
+            Math.cos(t * 0.5) * 4.5,
+            Math.sin(t * 0.35) * 1.8 + 0.8,
+            Math.sin(t * 0.5) * 4.5,
+        );
+
+        camera.position.x += (tx * 0.8 - camera.position.x) * 0.03;
+        camera.position.y += (-ty * 0.35 + 0.8 - camera.position.y) * 0.03;
+        camera.lookAt(0, 0.0, 0);
+
+        particles.rotation.y += 0.0003;
+
+        if (skyProgress > 0.01) {
+            pollenA.rotation.y += 0.00035;
+            pollenA.position.y = Math.sin(t * 0.3) * 0.15;
+            pollenB.rotation.y -= 0.00025;
+            pollenB.position.y = Math.sin(t * 0.45 + 1.0) * 0.12;
+            pollenC.rotation.y += 0.0002;
+            pollenC.position.y = Math.sin(t * 0.25 + 2.0) * 0.08;
+        }
+
+        // Wind animation — only runs when outdoor scene is visible
+        if (skyProgress > 0.01) {
+            for (let i = 0; i < BLADES; i++) {
+                const bx = bladeBase[i * 5],
+                    bz = bladeBase[i * 5 + 1];
+                const rY = bladeBase[i * 5 + 2];
+                const sx = bladeBase[i * 5 + 3],
+                    sy = bladeBase[i * 5 + 4];
+                // Two-frequency sway + constant lean gives natural gusting feel
+                const phase = bx * 0.28 + bz * 0.12;
+                const sway =
+                    0.13 * Math.sin(t * 1.9 + phase) +
+                    0.06 * Math.sin(t * 3.5 + phase * 1.6) +
+                    0.04; // slight persistent lean into wind
+                dummy.position.set(bx, -2.6, bz);
+                dummy.rotation.set(sway, rY, 0);
+                dummy.scale.set(sx, sy, 1);
+                dummy.updateMatrix();
+                blades.setMatrixAt(i, dummy.matrix);
+            }
+            blades.instanceMatrix.needsUpdate = true;
+
+            // Flower wind — same sway formula, head position follows stem tip
+            for (let i = 0; i < FLOWERS; i++) {
+                const fx = flowerBase[i * 5],
+                    fz = flowerBase[i * 5 + 1];
+                const rotY = flowerBase[i * 5 + 2],
+                    sc = flowerBase[i * 5 + 3];
+                const stemH = flowerBase[i * 5 + 4];
+
+                const phase = fx * 0.28 + fz * 0.12;
+                const sway =
+                    0.1 * Math.sin(t * 1.9 + phase) +
+                    0.05 * Math.sin(t * 3.5 + phase * 1.6) +
+                    0.03;
+
+                // Head position: curve top rotated by rotY then tilted by sway around local X
+                const headX =
+                    fx +
+                    BEND * stemH * Math.cos(rotY) +
+                    stemH * Math.sin(sway) * Math.sin(rotY);
+                const headY = -2.6 + stemH * Math.cos(sway);
+                const headZ =
+                    fz -
+                    BEND * stemH * Math.sin(rotY) +
+                    stemH * Math.sin(sway) * Math.cos(rotY);
+
+                fDummy.position.set(fx, -2.6, fz);
+                fDummy.rotation.set(sway, rotY, 0);
+                fDummy.scale.setScalar(stemH);
+                fDummy.updateMatrix();
+                fStemMesh.setMatrixAt(i, fDummy.matrix);
+
+                fDummy.position.set(headX, headY, headZ);
+                fDummy.rotation.set(sway, rotY, 0);
+                fDummy.scale.setScalar(sc);
+                fDummy.updateMatrix();
+                petalsMesh.setMatrixAt(i, fDummy.matrix);
+
+                fDummy.position.set(headX, headY, headZ);
+                fDummy.rotation.set(0, rotY, 0);
+                fDummy.scale.setScalar(sc);
+                fDummy.updateMatrix();
+                centersMesh.setMatrixAt(i, fDummy.matrix);
+            }
+            petalsMesh.instanceMatrix.needsUpdate = true;
+            centersMesh.instanceMatrix.needsUpdate = true;
+            fStemMesh.instanceMatrix.needsUpdate = true;
+        }
+
+        // Sky transition
+        skyProgress += isOutdoor ? 0.018 : -0.018;
+        skyProgress = Math.max(0, Math.min(1, skyProgress));
+        outdoor.visible = skyProgress > 0.01;
+        if (skyProgress > 0.01) {
+            renderer.setClearColor(
+                skyDark.clone().lerp(skyBlue, skyProgress),
+                1,
+            );
+        } else {
+            renderer.setClearColor(0x000000, 0);
+        }
+
+        renderer.render(scene, camera);
+    })();
+
+    window.addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+    });
+</script>
+
+<style>
+    main {
+        position: relative;
+        width: 100%;
+        height: 100vh;
+        overflow: hidden;
+        animation: fadeIn 1.4s ease forwards;
+    }
+
+    #flower-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    .atmos-glow {
+        position: absolute;
+        top: 42%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 540px;
+        height: 540px;
+        background: radial-gradient(
+            circle,
+            rgba(220, 90, 0, 0.2) 0%,
+            transparent 68%
+        );
+        filter: blur(52px);
+        pointer-events: none;
+        z-index: 2;
+        animation: pulse 5.5s ease-in-out infinite;
+    }
+
+    .vignette {
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(
+            ellipse at center,
+            transparent 32%,
+            rgba(0, 0, 0, 0.78) 100%
+        );
+        pointer-events: none;
+        z-index: 4;
+    }
+
+    .grain {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 6;
+        opacity: 0.04;
+        mix-blend-mode: overlay;
+    }
+
+    .corner {
+        position: fixed;
+        width: 22px;
+        height: 22px;
+        z-index: 50;
+        animation: fadeIn 0.8s ease 1s both;
+        opacity: 0.22;
+    }
+    .corner-tl {
+        top: 2rem;
+        left: 2rem;
+        border-top: 1px solid #fff;
+        border-left: 1px solid #fff;
+    }
+    .corner-tr {
+        top: 2rem;
+        right: 2rem;
+        border-top: 1px solid #fff;
+        border-right: 1px solid #fff;
+    }
+    .corner-bl {
+        bottom: 2rem;
+        left: 2rem;
+        border-bottom: 1px solid #fff;
+        border-left: 1px solid #fff;
+    }
+    .corner-br {
+        bottom: 2rem;
+        right: 2rem;
+        border-bottom: 1px solid #fff;
+        border-right: 1px solid #fff;
+    }
+
+    .message {
+        position: absolute;
+        bottom: 11%;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        z-index: 20;
+        pointer-events: none;
+        width: max-content;
+        animation: slideUp 1.1s ease 0.6s both;
+    }
+
+    h1 {
+        font-family: "Playfair Display", serif;
+        font-weight: 700;
+        font-size: clamp(3.2rem, 8.5vw, 7rem);
+        color: #fff5a0;
+        line-height: 0.95;
+        letter-spacing: -0.025em;
+    }
+
+    h1 em {
+        font-style: italic;
+        color: #fff5a0;
+    }
+
+    h1.orange,
+    h1.orange em {
+        color: #faee9a;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
+        transition:
+            color 0.4s ease,
+            text-shadow 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideUp {
+        from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    }
+
+    #poem {
+        position: fixed;
+        left: 3rem;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 50;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.8s ease 0.3s;
+        max-width: 580px;
+    }
+    #poem.visible {
+        opacity: 1;
+    }
+    #poem p {
+        font-family: "Playfair Display", serif;
+        font-size: clamp(1.2rem, 2.4vw, 1.7rem);
+        font-style: italic;
+        color: #1a3a0a;
+        line-height: 1.8;
+        margin: 0;
+        text-shadow: 0 1px 6px rgba(255, 255, 255, 0.35);
+    }
+    #poem .author {
+        display: block;
+        margin-top: 1.2rem;
+        font-family: "Inter", sans-serif;
+        font-weight: 300;
+        font-size: 0.8rem;
+        letter-spacing: 0.15em;
+        color: #2a5a18;
+        text-shadow: 0 1px 4px rgba(255, 255, 255, 0.3);
+    }
+
+    #audio-controls {
+        position: fixed;
+        bottom: 2.2rem;
+        right: 2.5rem;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.5rem 0.9rem;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 99px;
+        backdrop-filter: blur(12px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.6s ease 0.4s;
+    }
+    #audio-controls.visible {
+        opacity: 1;
+        pointer-events: all;
+    }
+    #audio-controls button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #1a3a0a;
+        display: flex;
+        align-items: center;
+        padding: 0.1rem;
+        transition: opacity 0.2s;
+    }
+    #audio-controls button:hover { opacity: 0.7; }
+    #volume-slider {
+        -webkit-appearance: none;
+        width: 70px;
+        height: 3px;
+        border-radius: 99px;
+        background: rgba(26, 58, 10, 0.35);
+        outline: none;
+        cursor: pointer;
+    }
+    #volume-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #1a3a0a;
+        cursor: pointer;
+    }
+
+    #fade-overlay {
+        position: fixed;
+        inset: 0;
+        background: #09090f;
+        z-index: 300;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.5s ease;
+    }
+    #fade-overlay.visible {
+        opacity: 1;
+        pointer-events: all;
+    }
+
+    #picame-btn.hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: scale(0.85);
+    }
+
+    #picame-btn {
+        position: fixed;
+        top: 2.2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 100;
+        padding: 0.55rem 1.5rem;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 99px;
+        color: rgba(255, 255, 255, 0.75);
+        font-family: "Inter", sans-serif;
+        font-size: 0.7rem;
+        font-weight: 300;
+        letter-spacing: 0.25em;
+        cursor: pointer;
+        backdrop-filter: blur(12px);
+        transition:
+            background 0.3s,
+            border-color 0.3s,
+            color 0.3s,
+            transform 0.15s;
+    }
+    #picame-btn:hover {
+        background: rgba(255, 255, 255, 0.16);
+        border-color: rgba(255, 255, 255, 0.4);
+        color: #fff;
+        transform: translateX(-50%) scale(1.04);
+    }
+    #picame-btn.outdoor {
+        background: rgba(100, 200, 255, 0.25);
+        border-color: rgba(100, 200, 255, 0.6);
+        color: #fff;
+    }
+
+    @keyframes pulse {
+        0%,
+        100% {
+            opacity: 0.65;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        50% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+    }
+</style>
