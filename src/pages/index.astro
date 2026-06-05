@@ -307,7 +307,7 @@ import Layout from "../layouts/Layout.astro";
         const bz = Math.sin(ang) * dist;
         const rY = Math.random() * Math.PI * 2;
         const sx = 0.7 + Math.random() * 0.8;
-        const sy = 0.5 + Math.random() * 3;
+        const sy = 0.3 + Math.random() * 5;
 
         bladeBase[i * 5] = bx;
         bladeBase[i * 5 + 1] = bz;
@@ -367,19 +367,7 @@ import Layout from "../layouts/Layout.astro";
     }
 
     const FLOWERS = 2000;
-    const BEND = 0.18; // horizontal offset at stem top
     const fDummy = new THREE.Object3D();
-
-    // Curved stem geometry — bends toward local +X; Y-rotation per instance randomises direction
-    const stemCurveGeo = (() => {
-        const curve = new THREE.CatmullRomCurve3([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(BEND * 0.2, 0.33, 0),
-            new THREE.Vector3(BEND * 0.6, 0.67, 0),
-            new THREE.Vector3(BEND, 1.0, 0),
-        ]);
-        return new THREE.TubeGeometry(curve, 8, 0.007, 5, false);
-    })();
 
     const petalsMesh = new THREE.InstancedMesh(
         buildDaisyGeo(),
@@ -406,44 +394,28 @@ import Layout from "../layouts/Layout.astro";
         }),
         FLOWERS,
     );
-    const fStemMesh = new THREE.InstancedMesh(
-        stemCurveGeo,
-        new THREE.MeshPhysicalMaterial({ color: 0x3a8a20, roughness: 0.7 }),
-        FLOWERS,
-    );
 
-    // [fx, fz, rotY, sc, stemH]
-    const flowerBase = new Float32Array(FLOWERS * 5);
+    // [fx, fz, rotY, sc, floatY, floatPhase]
+    const flowerBase = new Float32Array(FLOWERS * 6);
 
     for (let i = 0; i < FLOWERS; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const dist = Math.random() * 22;
+        const dist = Math.random() * 12;
         const fx = Math.cos(ang) * dist;
         const fz = Math.sin(ang) * dist;
-        const stemH = 0.85 + Math.random() * 0.75; // taller: 0.55–0.90
-        const rotY = Math.random() * Math.PI * 2; // random bend direction
+        const rotY = Math.random() * Math.PI * 2;
         const sc = 0.6 + Math.random() * 0.5;
+        const floatY = -2.2 + Math.random() * 1;
+        const floatPhase = Math.random() * Math.PI * 2;
 
-        flowerBase[i * 5] = fx;
-        flowerBase[i * 5 + 1] = fz;
-        flowerBase[i * 5 + 2] = rotY;
-        flowerBase[i * 5 + 3] = sc;
-        flowerBase[i * 5 + 4] = stemH;
+        flowerBase[i * 6] = fx;
+        flowerBase[i * 6 + 1] = fz;
+        flowerBase[i * 6 + 2] = rotY;
+        flowerBase[i * 6 + 3] = sc;
+        flowerBase[i * 6 + 4] = floatY;
+        flowerBase[i * 6 + 5] = floatPhase;
 
-        // Top of curved stem in world space (no wind yet)
-        const headX = fx + BEND * stemH * Math.cos(rotY);
-        const headY = -2.6 + stemH;
-        const headZ = fz - BEND * stemH * Math.sin(rotY);
-
-        // Stem: base at ground, scaled to stemH, rotY sets bend direction
-        fDummy.position.set(fx, -2.6, fz);
-        fDummy.rotation.set(0, rotY, 0);
-        fDummy.scale.setScalar(stemH);
-        fDummy.updateMatrix();
-        fStemMesh.setMatrixAt(i, fDummy.matrix);
-
-        // Petals at stem top
-        fDummy.position.set(headX, headY, headZ);
+        fDummy.position.set(fx, floatY, fz);
         fDummy.rotation.set(
             (Math.random() - 0.5) * 0.2,
             rotY,
@@ -453,8 +425,7 @@ import Layout from "../layouts/Layout.astro";
         fDummy.updateMatrix();
         petalsMesh.setMatrixAt(i, fDummy.matrix);
 
-        // Center flush with petals
-        fDummy.position.set(headX, headY, headZ);
+        fDummy.position.set(fx, floatY, fz);
         fDummy.rotation.set(0, rotY, 0);
         fDummy.scale.setScalar(sc);
         fDummy.updateMatrix();
@@ -462,8 +433,6 @@ import Layout from "../layouts/Layout.astro";
     }
     petalsMesh.instanceMatrix.needsUpdate = true;
     centersMesh.instanceMatrix.needsUpdate = true;
-    fStemMesh.instanceMatrix.needsUpdate = true;
-    outdoor.add(fStemMesh);
     outdoor.add(petalsMesh);
     outdoor.add(centersMesh);
 
@@ -704,7 +673,7 @@ import Layout from "../layouts/Layout.astro";
             if (isOutdoor) {
                 rainTimer = setTimeout(() => {
                     isRaining = true;
-                }, 30000);
+                }, 120000);
                 audio.play();
                 setPlayIcon(true);
             } else {
@@ -783,13 +752,14 @@ import Layout from "../layouts/Layout.astro";
             }
             blades.instanceMatrix.needsUpdate = true;
 
-            // Flower wind — same sway formula, head position follows stem tip
+            // Flower wind — gentle sway in place
             for (let i = 0; i < FLOWERS; i++) {
-                const fx = flowerBase[i * 5],
-                    fz = flowerBase[i * 5 + 1];
-                const rotY = flowerBase[i * 5 + 2],
-                    sc = flowerBase[i * 5 + 3];
-                const stemH = flowerBase[i * 5 + 4];
+                const fx = flowerBase[i * 6],
+                    fz = flowerBase[i * 6 + 1];
+                const rotY = flowerBase[i * 6 + 2],
+                    sc = flowerBase[i * 6 + 3];
+                const floatY = flowerBase[i * 6 + 4],
+                    floatPhase = flowerBase[i * 6 + 5];
 
                 const phase = fx * 0.28 + fz * 0.12;
                 const sway =
@@ -797,30 +767,15 @@ import Layout from "../layouts/Layout.astro";
                     0.05 * Math.sin(t * 3.5 + phase * 1.6) +
                     0.03;
 
-                // Head position: curve top rotated by rotY then tilted by sway around local X
-                const headX =
-                    fx +
-                    BEND * stemH * Math.cos(rotY) +
-                    stemH * Math.sin(sway) * Math.sin(rotY);
-                const headY = -2.6 + stemH * Math.cos(sway);
-                const headZ =
-                    fz -
-                    BEND * stemH * Math.sin(rotY) +
-                    stemH * Math.sin(sway) * Math.cos(rotY);
+                const fy = floatY + 0.15 * Math.sin(t * 0.7 + floatPhase);
 
-                fDummy.position.set(fx, -2.6, fz);
-                fDummy.rotation.set(sway, rotY, 0);
-                fDummy.scale.setScalar(stemH);
-                fDummy.updateMatrix();
-                fStemMesh.setMatrixAt(i, fDummy.matrix);
-
-                fDummy.position.set(headX, headY, headZ);
+                fDummy.position.set(fx, fy, fz);
                 fDummy.rotation.set(sway, rotY, 0);
                 fDummy.scale.setScalar(sc);
                 fDummy.updateMatrix();
                 petalsMesh.setMatrixAt(i, fDummy.matrix);
 
-                fDummy.position.set(headX, headY, headZ);
+                fDummy.position.set(fx, fy, fz);
                 fDummy.rotation.set(0, rotY, 0);
                 fDummy.scale.setScalar(sc);
                 fDummy.updateMatrix();
@@ -828,7 +783,6 @@ import Layout from "../layouts/Layout.astro";
             }
             petalsMesh.instanceMatrix.needsUpdate = true;
             centersMesh.instanceMatrix.needsUpdate = true;
-            fStemMesh.instanceMatrix.needsUpdate = true;
         }
 
         // Rain transition
